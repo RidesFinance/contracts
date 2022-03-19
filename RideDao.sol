@@ -4,8 +4,8 @@ pragma solidity >=0.4.22 <0.9.0;
 import "./Ride.sol";
 import "./USDC.sol";
 
-// RideDao V1.1
-contract RideDaoV11 {
+// RideDao V21
+contract RideDaoV21 {
   uint public totalNodes;
   address [] public rideNodesAddresses;
 
@@ -13,37 +13,44 @@ contract RideDaoV11 {
   USDC public usdcAddress;
   address private owner;
   uint public rideInterestRatePercent;
+  uint penaltyPercentage;
+  uint penaltyTime;
 
   struct Account {
     bool exists;
-    uint nanoCount;
-    uint miniCount;
-    uint kiloCount;
-    uint megaCount;
-    uint gigaCount;
-    uint interestAccumulated;
+    uint tuktukCount;
+    uint kombiCount;
+    uint fiatCount;
+    uint camaroCount;
+    uint lamboCount;
+    uint lastClaimTime;
   }
 
   mapping(address => Account) public accounts;
 
   // 0.5%, 0.6%, 0.7%, 0.8%, 1% /day
   uint [] public nodeMultiplers = [1, 10, 70, 160, 1000];
+  uint [] public nodeUSDCCost = [25, 100, 500, 1000, 5000];
+  uint [] public nodeRIDESCost = [25, 100, 500, 1000, 5000];
 
   constructor(Ride _rideAddress, USDC _usdcAddress) {
     owner = msg.sender;
     rideAddress = _rideAddress;
     usdcAddress = _usdcAddress;
-    rideInterestRatePercent = 1 * 10;
+    rideInterestRatePercent = 10;
+    penaltyPercentage = 10;
+    penaltyTime = 2*86400;
+
   }
 
-  function setupAccountForMigration(address _address, uint _nanoCount, uint _miniCount, uint _kiloCount, uint _megaCount, uint _gigaCount, uint _interestAccumulated) public {
+  function setupAccountForMigration(address _address, uint _tuktukCount, uint _kombiCount, uint _fiatCount, uint _camaroCount, uint _lamboCount, uint lastClaimTime) public {
     require(_address != address(0), "_address is address 0");
-    require(msg.sender == owner, 'Only owner can create a node.');
+    require(msg.sender == owner, 'Only owner can migrate nodes.');
 
     if(!accounts[_address].exists){
-      Account memory account = Account(true, _nanoCount, _miniCount, _kiloCount, _megaCount, _gigaCount, _interestAccumulated);
+      Account memory account = Account(true, _tuktukCount, _kombiCount, _fiatCount, _camaroCount, _lamboCount, lastClaimTime);
       rideNodesAddresses.push(_address);
-      totalNodes += _nanoCount + _miniCount + _kiloCount + _megaCount + _gigaCount;
+      totalNodes += _tuktukCount + _kombiCount + _fiatCount + _camaroCount + _lamboCount;
       accounts[_address] = account;
     }
   }
@@ -51,6 +58,12 @@ contract RideDaoV11 {
   function setNewNodeMultiplers(uint _nodeType, uint _nodeMultiplier) public {
     require(msg.sender == owner, 'Only owner can change node multipliers.');
     nodeMultiplers[_nodeType] = _nodeMultiplier;
+  }
+
+  function setNodeCosts(uint _nodeType, uint _RIDESCost, uint _USDCCost) public {
+    require(msg.sender == owner, 'Only owner can change node costs.');
+    nodeUSDCCost[_nodeType] = _USDCCost;
+    nodeRIDESCost[_nodeType] = _RIDESCost;
   }
 
   // totalNodes getter
@@ -70,7 +83,31 @@ contract RideDaoV11 {
   // accounts getter
   function getAccount(address _address) public view returns(uint, uint, uint, uint, uint, uint) {
     Account memory acc = accounts[_address];
-    return(acc.nanoCount, acc.miniCount, acc.kiloCount, acc.megaCount, acc.gigaCount, acc.interestAccumulated);
+    return(acc.tuktukCount, acc.kombiCount, acc.fiatCount, acc.camaroCount, acc.lamboCount, acc.lastClaimTime);
+  }
+
+  // accounts getter
+  function getlastClaimTime(address _address) public view returns(uint) {
+    Account memory acc = accounts[_address];
+    return(block.timestamp - acc.lastClaimTime);
+  }
+
+  function calculateInterestClaim(address _address) public view returns(uint) {
+      Account memory acc = accounts[_address];
+      uint timeElapsed = getlastClaimTime(_address);
+
+      if (timeElapsed < penaltyTime) {
+          timeElapsed = timeElapsed * penaltyPercentage / 100;
+      }
+
+      uint interestAccumulated;
+      interestAccumulated = (acc.tuktukCount * nodeMultiplers[0] * rideInterestRatePercent * timeElapsed * 10 ** 18) / (100 * 86400);
+      interestAccumulated += (acc.kombiCount * nodeMultiplers[1] * rideInterestRatePercent * timeElapsed * 10 ** 18) / (100 * 86400);
+      interestAccumulated += (acc.fiatCount * nodeMultiplers[2] * rideInterestRatePercent * timeElapsed * 10 ** 18) / (100 * 86400);
+      interestAccumulated += (acc.camaroCount * nodeMultiplers[3] * rideInterestRatePercent * timeElapsed * 10 ** 18) / (100 * 86400);
+      interestAccumulated += (acc.lamboCount * nodeMultiplers[4] * rideInterestRatePercent * timeElapsed * 10 ** 18) / (100 * 86400);
+
+      return(interestAccumulated);
   }
 
   function mintNode(address _address, uint _rideAmount, uint _usdcAmount, uint _nodeType) public {
@@ -84,34 +121,34 @@ contract RideDaoV11 {
       account = accounts[_address];
     }
     else{
-      account = Account(true, 0, 0, 0, 0, 0, 0);
+      account = Account(true, 0, 0, 0, 0, 0, block.timestamp);
       rideNodesAddresses.push(_address);
     }
 
     if(_nodeType == 0){
-      require(_rideAmount >= 25 * 10 ** 18, 'You must provide at least 25 RIDES for the LP token');
-      require(_usdcAmount >= 25 * 10 ** 6, 'You must provide at least 25 USDC for the LP token');
-      account.nanoCount++;
+      require(_rideAmount >= nodeRIDESCost[0] * 10 ** 18, 'Not enough RIDES provided for the Tuktuk node.');
+      require(_usdcAmount >= nodeUSDCCost[0] * 10 ** 6, 'Not enough USDC.e provided for the Tuktuk node.');
+      account.tuktukCount++;
     }
     else if(_nodeType == 1){
-      require(_rideAmount >= 100 * 10 ** 18, 'You must provide at least 100 RIDES for the LP token');
-      require(_usdcAmount >= 100 * 10 ** 6, 'You must provide at least 100 USDC for the LP token');
-      account.miniCount++;
+      require(_rideAmount >= nodeRIDESCost[1] * 10 ** 18, 'Not enough RIDES provided for the Kombi node.');
+      require(_usdcAmount >= nodeUSDCCost[1] * 10 ** 6, 'Not enough USDC.e provided for the Kombi node.');
+      account.kombiCount++;
     }
     else if(_nodeType == 2){
-      require(_rideAmount >= 500 * 10 ** 18, 'You must provide at least 500 RIDES for the LP token');
-      require(_usdcAmount >= 500 * 10 ** 6, 'You must provide at least 500 USDC for the LP token');
-      account.kiloCount++;
+      require(_rideAmount >= nodeRIDESCost[2] * 10 ** 18, 'Not enough RIDES provided for the Fiat node.');
+      require(_usdcAmount >= nodeUSDCCost[2] * 10 ** 6, 'Not enough USDC.e provided for the Fiat node.');
+      account.fiatCount++;
     }
     else if(_nodeType == 3){
-      require(_rideAmount >= 1000 * 10 ** 18, 'You must provide at least 1000 RIDES for the LP token');
-      require(_usdcAmount >= 1000 * 10 ** 6, 'You must provide at least 1000 USDC for the LP token');
-      account.megaCount++;
+      require(_rideAmount >= nodeRIDESCost[3] * 10 ** 18, 'Not enough RIDES provided for the Camaro node.');
+      require(_usdcAmount >= nodeUSDCCost[3] * 10 ** 6, 'Not enough USDC.e provided for the Camaro node.');
+      account.camaroCount++;
     }
     else if(_nodeType == 4){
-      require(_rideAmount >= 5000 * 10 ** 18, 'You must provide at least 5000 RIDES for the LP token');
-      require(_usdcAmount >= 5000 * 10 ** 6, 'You must provide at least 5000 USDC for the LP token');
-      account.gigaCount++;
+      require(_rideAmount >= nodeRIDESCost[4] * 10 ** 18, 'Not enough RIDES provided for the Lambo node.');
+      require(_usdcAmount >= nodeUSDCCost[4] * 10 ** 6, 'Not enough USDC.e provided for the Lambo node.');
+      account.lamboCount++;
     }
     totalNodes++;
     accounts[_address] = account;
@@ -123,63 +160,30 @@ contract RideDaoV11 {
   function withdrawInterest(address _to) public {
     require(_to != address(0), "_to is address 0");
     require(msg.sender == _to, 'Only user can widthraw its own funds.');
-    require(accounts[_to].interestAccumulated > 0, 'Interest accumulated must be greater than zero.');
-
-    uint amount = accounts[_to].interestAccumulated;
-    accounts[_to].interestAccumulated = 0;
-
+    require(getlastClaimTime(_to) > 60, 'You must wait at least 60 seconds to claim your rewards again.');
+    uint amount = calculateInterestClaim(_to);
+    accounts[_to].lastClaimTime = block.timestamp;
     rideAddress.transfer(_to, amount);
-  }
+    }
 
-  // _indexTo not included
-  function payInterest(uint _indexFrom, uint _indexTo) public {
+  function resetTimer(address _to, uint timestamp) public {
     require(msg.sender == owner, 'You must be the owner to run this.');
-
-    uint i;
-
-    if(_indexTo == 1){
-        _indexTo = getAccountsLength();
-    }
-
-    for(i = _indexFrom; i < _indexTo; i++){
-      address a = rideNodesAddresses[i];
-      Account memory acc = accounts[a];
-      uint interestAccumulated;
-
-      // add rideInterestRatePercent/100 RIDES per node that address has
-      interestAccumulated = (acc.nanoCount * nodeMultiplers[0] * rideInterestRatePercent * 10 ** 18) / 100;
-      interestAccumulated += (acc.miniCount * nodeMultiplers[1] * rideInterestRatePercent * 10 ** 18) / 100;
-      interestAccumulated += (acc.kiloCount * nodeMultiplers[2] * rideInterestRatePercent * 10 ** 18) / 100;
-      interestAccumulated += (acc.megaCount * nodeMultiplers[3] * rideInterestRatePercent * 10 ** 18) / 100;
-      interestAccumulated += (acc.gigaCount * nodeMultiplers[4] * rideInterestRatePercent * 10 ** 18) / 100;
-
-      acc.interestAccumulated += interestAccumulated;
-
-      accounts[a] = acc;
-    }
-  }
-
-  // runs daily at 2AM
-  function balancePool() public {
-    require(msg.sender == owner, 'You must be the owner to run this.');
-
-    uint poolAmount = rideAddress.balanceOf(address(this)) / 10 ** 18;
-    uint runwayInDays = poolAmount/((totalNodes * rideInterestRatePercent * nodeMultiplers[4]) / 100);
-    if(runwayInDays > 900){
-      uint newTotalTokens = (365 * rideInterestRatePercent * totalNodes * nodeMultiplers[4]) / 100; // 365 is the desired runway
-      uint amountToBurn = poolAmount - newTotalTokens;
-      rideAddress.burn(amountToBurn * 10 ** 18);
-    }
-    else if(runwayInDays < 360){
-      uint newTotalTokens = (365 * rideInterestRatePercent * totalNodes * nodeMultiplers[4]) / 100; // 365 is the desired runway
-      uint amountToMint = newTotalTokens - poolAmount;
-      rideAddress.mint(amountToMint * 10 ** 18);
-    }
+    accounts[_to].lastClaimTime = timestamp;
   }
 
   function changeInterestRate(uint _newRate) public {
     require(msg.sender == owner, 'You must be the owner to run this.');
     rideInterestRatePercent = _newRate;
+  }
+
+  function setpenaltyPercentage(uint _penaltyPercentage) public {
+    require(msg.sender == owner, 'You must be the owner to run this.');
+    penaltyPercentage = _penaltyPercentage;
+  }
+  
+  function setPenalty(uint _penaltyTime) public {
+    require(msg.sender == owner, 'You must be the owner to run this.');
+    penaltyTime = _penaltyTime;
   }
 
   function setRideAddress(Ride _newRides) public {
@@ -209,24 +213,24 @@ contract RideDaoV11 {
       account = accounts[_address];
     }
     else{
-      account = Account(true, 0, 0, 0, 0, 0, 0);
+      account = Account(true, 0, 0, 0, 0, 0, block.timestamp);
       rideNodesAddresses.push(_address);
     }
 
     if(_nodeType == 0){
-      account.nanoCount++;
+      account.tuktukCount++;
     }
     else if(_nodeType == 1){
-      account.miniCount++;
+      account.kombiCount++;
     }
     else if(_nodeType == 2){
-      account.kiloCount++;
+      account.fiatCount++;
     }
     else if(_nodeType == 3){
-      account.megaCount++;
+      account.camaroCount++;
     }
     else if(_nodeType == 4){
-      account.gigaCount++;
+      account.lamboCount++;
     }
     totalNodes++;
     accounts[_address] = account;
