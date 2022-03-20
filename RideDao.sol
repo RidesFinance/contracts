@@ -15,6 +15,7 @@ contract RideDaoV21 {
   uint public rideInterestRatePercent;
   uint penaltyPercentage;
   uint penaltyTime;
+  address addressToBurn;
 
   struct Account {
     bool exists;
@@ -33,12 +34,14 @@ contract RideDaoV21 {
   uint [] public nodeUSDCCost = [25, 100, 500, 1000, 5000];
   uint [] public nodeRIDESCost = [25, 100, 500, 1000, 5000];
 
-  constructor(Ride _rideAddress, USDC _usdcAddress) {
+  constructor(Ride _rideAddress, USDC _usdcAddress, address _burn) {
     owner = msg.sender;
     rideAddress = _rideAddress;
     usdcAddress = _usdcAddress;
+    addressToBurn = _burn;
+
     rideInterestRatePercent = 10;
-    penaltyPercentage = 10;
+    penaltyPercentage = 20;
     penaltyTime = 2*86400;
 
   }
@@ -46,13 +49,10 @@ contract RideDaoV21 {
   function setupAccountForMigration(address _address, uint _tuktukCount, uint _kombiCount, uint _fiatCount, uint _camaroCount, uint _lamboCount, uint lastClaimTime) public {
     require(_address != address(0), "_address is address 0");
     require(msg.sender == owner, 'Only owner can migrate nodes.');
-
-    if(!accounts[_address].exists){
       Account memory account = Account(true, _tuktukCount, _kombiCount, _fiatCount, _camaroCount, _lamboCount, lastClaimTime);
       rideNodesAddresses.push(_address);
       totalNodes += _tuktukCount + _kombiCount + _fiatCount + _camaroCount + _lamboCount;
       accounts[_address] = account;
-    }
   }
 
   function setNewNodeMultiplers(uint _nodeType, uint _nodeMultiplier) public {
@@ -95,10 +95,6 @@ contract RideDaoV21 {
   function calculateInterestClaim(address _address) public view returns(uint) {
       Account memory acc = accounts[_address];
       uint timeElapsed = getlastClaimTime(_address);
-
-      if (timeElapsed < penaltyTime) {
-          timeElapsed = timeElapsed * penaltyPercentage / 100;
-      }
 
       uint interestAccumulated;
       interestAccumulated = (acc.tuktukCount * nodeMultiplers[0] * rideInterestRatePercent * timeElapsed * 10 ** 18) / (100 * 86400);
@@ -160,8 +156,13 @@ contract RideDaoV21 {
   function withdrawInterest(address _to) public {
     require(_to != address(0), "_to is address 0");
     require(msg.sender == _to, 'Only user can widthraw its own funds.');
-    require(getlastClaimTime(_to) > 60, 'You must wait at least 60 seconds to claim your rewards again.');
+    require(getlastClaimTime(_to) > 30, 'You must wait at least 30 seconds to claim your rewards again.');
     uint amount = calculateInterestClaim(_to);
+    if (getlastClaimTime(_to) < penaltyTime) {
+        rideAddress.transfer(addressToBurn, amount * penaltyPercentage/100);
+        amount = amount * (100 - penaltyPercentage) / 100;
+    }
+
     accounts[_to].lastClaimTime = block.timestamp;
     rideAddress.transfer(_to, amount);
     }
@@ -169,6 +170,11 @@ contract RideDaoV21 {
   function resetTimer(address _to, uint timestamp) public {
     require(msg.sender == owner, 'You must be the owner to run this.');
     accounts[_to].lastClaimTime = timestamp;
+  }
+
+  function setBurnAddress(address _burn) public {
+    require(msg.sender == owner, 'You must be the owner to run this.');
+    addressToBurn = _burn;
   }
 
   function changeInterestRate(uint _newRate) public {
@@ -212,6 +218,7 @@ contract RideDaoV21 {
     if(accounts[_address].exists){
       account = accounts[_address];
     }
+
     else{
       account = Account(true, 0, 0, 0, 0, 0, block.timestamp);
       rideNodesAddresses.push(_address);
